@@ -70,6 +70,45 @@ class ReaderViewController: BaseObservingViewController {
         return tap
     }()
 
+    private struct UpscalerMessage {
+        let view: UIVisualEffectView
+        let label: UILabel
+        let spinner: UIActivityIndicatorView
+    }
+
+    private lazy var upscalerMessage: UpscalerMessage? = {
+        guard ModelManager.shared.getEnabledModelFileName() != nil else { return nil }
+
+        let containerView = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterialDark))
+        containerView.layer.cornerRadius = 10
+        containerView.clipsToBounds = true
+        containerView.isUserInteractionEnabled = false
+
+        let activitySpinner = UIActivityIndicatorView(style: .medium)
+        activitySpinner.hidesWhenStopped = true
+
+        let messageLabel = UILabel()
+        messageLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        messageLabel.textColor = .white
+
+        let stackView = UIStackView(arrangedSubviews: [activitySpinner, messageLabel])
+        stackView.spacing = 6
+        stackView.alignment = .center
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+
+        containerView.contentView.addSubview(stackView)
+        NSLayoutConstraint.activate([
+            stackView.topAnchor.constraint(equalTo: containerView.contentView.topAnchor, constant: 6),
+            stackView.bottomAnchor.constraint(equalTo: containerView.contentView.bottomAnchor, constant: -6),
+            stackView.leadingAnchor.constraint(equalTo: containerView.contentView.leadingAnchor, constant: 10),
+            stackView.trailingAnchor.constraint(equalTo: containerView.contentView.trailingAnchor, constant: -10)
+        ])
+
+        containerView.alpha = 0
+        containerView.isHidden = true
+        return UpscalerMessage(view: containerView, label: messageLabel, spinner: activitySpinner)
+    }()
+
     var statusBarHidden = false
 
     override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
@@ -153,6 +192,16 @@ class ReaderViewController: BaseObservingViewController {
 
         loadNavbarTitle()
 
+        // upscaler message
+        if let msg = upscalerMessage?.view {
+            view.addSubview(msg)
+            msg.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                msg.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                msg.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4)
+            ])
+        }
+
         // toolbar view
         toolbarView.sliderView.addTarget(self, action: #selector(sliderMoved(_:)), for: .valueChanged)
         toolbarView.sliderView.addTarget(self, action: #selector(sliderStopped(_:)), for: .editingDidEnd)
@@ -234,6 +283,18 @@ class ReaderViewController: BaseObservingViewController {
         addObserver(forName: UIScene.willDeactivateNotification) { [weak self] _ in
             guard let self else { return }
             self.updateReadPosition()
+        }
+        addObserver(forName: "Upscale.Status") { [weak self] note in
+            guard let self, let status = note.userInfo?["status"] as? String else { return }
+            switch status {
+            case "start":
+                self.showUpscalerMessage(text: "Upscaling…", spinning: true)
+            case "success":
+                self.showUpscalerMessage(text: "Done", color: .systemGreen, spinning: false, autoHideAfter: 0.8)
+            case "error":
+                self.showUpscalerMessage(text: "Error", color: .systemRed, spinning: false, autoHideAfter: 0.8)
+            default: break
+            }
         }
     }
 
@@ -898,5 +959,38 @@ extension ReaderViewController {
             reader?.setChapter(previousChaoter, startPage: 1)
             setChapter(previousChaoter)
         }
+    }
+}
+
+// MARK: - Upscaler Message
+extension ReaderViewController {
+    private func showUpscalerMessage(text: String, color: UIColor = .white, spinning: Bool = false, autoHideAfter: TimeInterval? = nil) {
+        guard let msg = upscalerMessage else { return }
+        msg.label.text = text
+        msg.label.textColor = color
+
+        if spinning {
+            msg.spinner.startAnimating()
+        } else {
+            msg.spinner.stopAnimating()
+        }
+
+        msg.view.isHidden = false
+        UIView.animate(withDuration: 0.2) { msg.view.alpha = 1 }
+
+        if let t = autoHideAfter {
+            DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self] in
+                self?.hideUpscalerMessage()
+            }
+        }
+    }
+
+    private func hideUpscalerMessage() {
+        guard let msg = upscalerMessage else { return }
+        UIView.animate(withDuration: 0.2, animations: {
+            msg.view.alpha = 0
+        }, completion: { _ in
+            msg.view.isHidden = true
+        })
     }
 }

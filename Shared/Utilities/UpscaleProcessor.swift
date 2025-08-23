@@ -45,16 +45,29 @@ struct UpscaleProcessor: ImageProcessing {
                 LogManager.logger.error("Unable to load enabled upscaling model: \(error)")
                 return image
             }
+            await postUpscaleStatus("start")
             guard let output = await model.process(cgImage) else {
                 LogManager.logger.error("Upscaling model failed to process image")
+                await postUpscaleStatus("error")
                 return image
             }
+            await postUpscaleStatus("success")
 #if os(iOS) || os(tvOS)
             return await PlatformImage(cgImage: output, scale: UIScreen.main.scale, orientation: image.imageOrientation)
 #else
             return PlatformImage(cgImage: output, size: .init(width: image.size.width, height: image.size.height))
 #endif
         }.get()
+    }
+
+    private func postUpscaleStatus(_ status: String) async {
+        await MainActor.run {
+            NotificationCenter.default.post(
+                name: .init("Upscale.Status"),
+                object: nil,
+                userInfo: ["status": status]
+            )
+        }
     }
 
     enum ProcessorError: Error {
